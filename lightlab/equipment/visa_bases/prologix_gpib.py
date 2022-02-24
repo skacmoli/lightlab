@@ -79,7 +79,7 @@ class PrologixResourceManager(TCPSocketConnection):
         with self.connected():
             self.send('++auto 0')  # do not read-after-write
             self.send('++mode 1')  # controller mode
-            self.send('++read_tmo_ms 2000')  # timeout in ms
+            self.send('++read_tmo_ms 20000')  # timeout in ms
             self.send('++eos 0')  # append CR+LF after every GPIB
             self.send('++savecfg 0')  # Disable saving of configuration parameters in EPROM
 
@@ -279,10 +279,12 @@ class PrologixGPIBObject(InstrumentSessionBase):
             pconn.send('++addr {}'.format(self._prologix_gpib_addr_formatted()))
             pconn.send('++clr')
 
-    def query_raw_binary(self, queryStr, withTimeout=None):
+    def query_raw_binary(self, queryStr, withTimeout=1000):
         '''Read the unmodified string sent from the instrument to the
            computer. In contrast to query(), no termination characters
-           are stripped. Also no decoding.'''
+           are stripped. Also no decoding.
+            Attention! withTimeout is in milliseconds. 1000 means 1000 milliseconds.
+           '''
 
         with self._prologix_rm.connected() as pconn:
             pconn.send('++addr {}'.format(self._prologix_gpib_addr_formatted()))
@@ -290,22 +292,33 @@ class PrologixGPIBObject(InstrumentSessionBase):
 
         if withTimeout is None:
             withTimeout = self.timeout
-
-        # checking if message is available in small increments
+        
         currenttime = time.time()
-        expirationtime = currenttime + withTimeout
-        while time.time() < expirationtime:
-            # self.timeout = newTimeout
-            status_byte = self.spoll()
-            # MAV indicates that the message is available
-            MAV = (status_byte >> 4) & 1
-            if MAV == 1:
+        expirationtime = currenttime + withTimeout / 1000
+        while time.time() <= expirationtime:
+            try:
                 retStr = self._prologix_rm.query('++read eoi')
                 return retStr.rstrip()
-            # ask for the message in small increments
-            time.sleep(0.1)
+            except socket.timeout:
+                time.sleep(0.03)
+        raise RuntimeError("Query timed out. Instrument too slow. Try increasing withTimeout.")
+        
 
-        raise RuntimeError('Query timed out')
+        # checking if message is available in small increments
+#         currenttime = time.time()
+#         expirationtime = currenttime + withTimeout
+#         while time.time() < expirationtime:
+#             # self.timeout = newTimeout
+#             status_byte = self.spoll()
+#             # MAV indicates that the message is available
+#             MAV = (status_byte >> 4) & 1
+#             if MAV == 1:
+         #retStr = self._prologix_rm.query('++read eoi')
+          #      return retStr.rstrip()
+            # ask for the message in small increments
+         #   time.sleep(0.1)
+
+        #raise RuntimeError('Query timed out')
 
     @property
     def timeout(self):
